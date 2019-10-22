@@ -222,6 +222,10 @@ extern int devm_devfreq_register_opp_notifier(struct device *dev,
 					      struct devfreq *devfreq);
 extern void devm_devfreq_unregister_opp_notifier(struct device *dev,
 						struct devfreq *devfreq);
+#ifdef CONFIG_VENDOR_REALME
+extern int devfreq_set_limit(struct devfreq *df, unsigned long min,
+				unsigned long max);
+#endif /* CONFIG_VENDOR_REALME */
 
 /**
  * devfreq_update_stats() - update the last_status pointer in struct devfreq
@@ -330,6 +334,14 @@ static inline int devfreq_update_stats(struct devfreq *df)
 {
 	return -EINVAL;
 }
+
+#ifdef CONFIG_VENDOR_REALME
+static inline int devfreq_set_limit(struct devfreq *df,unsigned long min,
+				    unsigned long max)
+{
+	return 0;
+}
+#endif /* CONFIG_VENDOR_REALME */
 #endif /* CONFIG_PM_DEVFREQ */
 
 #endif /* __LINUX_DEVFREQ_H__ */

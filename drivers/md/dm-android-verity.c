@@ -747,10 +747,14 @@ static int android_verity_ctr(struct dm_target *ti, unsigned argc, char **argv)
 
 	if (err) {
 		/* Allow invalid metadata when the device is unlocked */
-		if (is_unlocked()) {
+#ifdef CONFIG_VENDOR_REALME //Fanhong.Kong@PSW.BSP.CHG,add 2017/11/18 for close dm verify	
+//		if (is_unlocked()) {
+#endif/*CONFIG_VENDOR_REALME*/		
 			DMWARN("Allow invalid metadata when unlocked");
 			return create_linear_device(ti, dev, target_device);
-		}
+#ifdef CONFIG_VENDOR_REALME //Fanhong.Kong@PSW.BSP.CHG,add 2017/11/18 for close dm verify			
+//		}
+#endif/*CONFIG_VENDOR_REALME*/	
 		DMERR("Error while extracting metadata");
 		handle_error();
 		goto free_metadata;

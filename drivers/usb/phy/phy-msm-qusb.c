@@ -585,8 +585,14 @@ static int qusb_phy_init(struct usb_phy *phy)
 
 		pr_debug("%s(): Programming TUNE2 parameter as:%x\n", __func__,
 				qphy->tune2_val);
+#ifndef CONFIG_VENDOR_REALME
+// wenbin.liu@BSP.CHG.Basic, 2017/11/28
+// Add for not use efuse correct
 		writel_relaxed(qphy->tune2_val,
 				qphy->base + QUSB2PHY_PORT_TUNE2);
+#else
+		pr_err("%s: not use efuse correct\n", __func__);
+#endif /*CONFIG_VENDOR_REALME*/
 	}
 
 	/* If tune modparam set, override tune value */

@@ -8,6 +8,11 @@
 #include <linux/mm.h>
 #include <linux/quicklist.h>
 #include <linux/cma.h>
+#ifdef CONFIG_VENDOR_REALME
+/* Huacai.Zhou@PSW.BSP.Kernel.MM, 2018-06-26, add ion total used account*/
+#include <linux/ion.h>
+#endif /*CONFIG_VENDOR_REALME*/
+
 
 void show_mem(unsigned int filter)
 {

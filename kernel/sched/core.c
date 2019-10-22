@@ -4908,6 +4908,9 @@ out_put_task:
 	put_task_struct(p);
 	return retval;
 }
+#ifdef CONFIG_VENDOR_REALME
+EXPORT_SYMBOL(sched_setaffinity);
+#endif /* CONFIG_VENDOR_REALME */
 
 static int get_user_cpu_mask(unsigned long __user *user_mask_ptr, unsigned len,
 			     struct cpumask *new_mask)
@@ -5974,6 +5977,9 @@ out:
 			    start_time, 1);
 	return ret_code;
 }
+#ifdef CONFIG_VENDOR_REALME
+EXPORT_SYMBOL(sched_isolate_cpu);
+#endif /* CONFIG_VENDOR_REALME */
 
 /*
  * Note: The client calling sched_isolate_cpu() is repsonsible for ONLY
@@ -6024,6 +6030,10 @@ out:
 	return ret_code;
 }
 
+#ifdef CONFIG_VENDOR_REALME
+EXPORT_SYMBOL(sched_unisolate_cpu_unlocked);
+#endif /* CONFIG_VENDOR_REALME */
+
 int sched_unisolate_cpu(int cpu)
 {
 	int ret_code;
@@ -6033,6 +6043,9 @@ int sched_unisolate_cpu(int cpu)
 	cpu_maps_update_done();
 	return ret_code;
 }
+#ifdef CONFIG_VENDOR_REALME
+EXPORT_SYMBOL(sched_unisolate_cpu);
+#endif /* CONFIG_VENDOR_REALME */
 
 #endif /* CONFIG_HOTPLUG_CPU */
 
@@ -8197,17 +8210,16 @@ static int cpuset_cpu_active(struct notifier_block *nfb, unsigned long action,
 		 * operation in the resume sequence, just build a single sched
 		 * domain, ignoring cpusets.
 		 */
-		num_cpus_frozen--;
-		if (likely(num_cpus_frozen)) {
-			partition_sched_domains(1, NULL, NULL);
+		partition_sched_domains(1, NULL, NULL);
+		if (--num_cpus_frozen)
 			break;
-		}
 
 		/*
 		 * This is the last CPU online operation. So fall through and
 		 * restore the original sched domains by considering the
 		 * cpuset configurations.
 		 */
+		cpuset_force_rebuild();
 
 	case CPU_ONLINE:
 		cpuset_update_active_cpus(true);

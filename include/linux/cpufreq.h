@@ -683,6 +683,11 @@ static inline bool policy_has_boost_freq(struct cpufreq_policy *policy)
 	return false;
 }
 #endif
+
+#ifdef CONFIG_VENDOR_REALME
+struct list_head *get_cpufreq_policy_list(void);
+#endif /* CONFIG_VENDOR_REALME */
+
 /* the following funtion is for cpufreq core use only */
 struct cpufreq_frequency_table *cpufreq_frequency_get_table(unsigned int cpu);
 
