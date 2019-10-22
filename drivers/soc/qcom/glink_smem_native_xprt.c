@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1224,7 +1224,7 @@ irqreturn_t irq_handler(int irq, void *priv)
 //Hongbo.Dong@MultiMedia.AudioServer.Framework, 2018/10/16, Modify for CR 2225619, audio play more efficient
 	tasklet_hi_schedule(&einfo->tasklet);
 #else /* CONFIG_VENDOR_REALME */
-    __rx_worker(einfo, true);
+	__rx_worker(einfo, true);
 #endif /* CONFIG_VENDOR_REALME */
 	einfo->rx_irq_count++;
 
