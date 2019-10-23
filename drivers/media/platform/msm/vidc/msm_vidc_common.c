@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1478,7 +1478,7 @@ void validate_output_buffers(struct msm_vidc_inst *inst)
 	}
 	mutex_lock(&inst->outputbufs.lock);
 	list_for_each_entry(binfo, &inst->outputbufs.list, list) {
-		if (binfo->buffer_ownership != DRIVER) {
+		if (binfo && binfo->buffer_ownership != DRIVER) {
 			dprintk(VIDC_DBG,
 				"This buffer is with FW %pa\n",
 				&binfo->handle->device_addr);
@@ -2614,6 +2614,7 @@ int msm_comm_check_core_init(struct msm_vidc_core *core)
 	int rc = 0;
 	struct hfi_device *hdev;
 	struct msm_vidc_inst *inst = NULL;
+	int dref = 0;
 
 	mutex_lock(&core->lock);
 	if (core->state >= VIDC_CORE_INIT_DONE) {
@@ -2637,11 +2638,16 @@ int msm_comm_check_core_init(struct msm_vidc_core *core)
 		 * Just grab one of the inst from instances list and
 		 * use it.
 		 */
-		inst = list_first_entry(&core->instances,
+		inst = list_first_entry_or_null(&core->instances,
 			struct msm_vidc_inst, list);
+		if (inst)
+			dref = kref_get_unless_zero(&inst->kref);
 
 		mutex_unlock(&core->lock);
-		msm_comm_print_debug_info(inst);
+		if (dref) {
+			msm_comm_print_debug_info(inst);
+			put_inst(inst);
+		}
 		mutex_lock(&core->lock);
 
 		BUG_ON(msm_vidc_debug_timeout);
@@ -3169,8 +3175,7 @@ static int set_output_buffers(struct msm_vidc_inst *inst,
 			if (!handle) {
 				dprintk(VIDC_ERR,
 					"Failed to allocate output memory\n");
-				rc = -ENOMEM;
-				goto err_no_mem;
+				return -ENOMEM;
 			}
 			rc = msm_comm_smem_cache_operations(inst,
 					handle, SMEM_CACHE_CLEAN, -1);
@@ -3222,10 +3227,9 @@ static int set_output_buffers(struct msm_vidc_inst *inst,
 	}
 	return rc;
 fail_set_buffers:
-	msm_comm_smem_free(inst, handle);
-err_no_mem:
 	kfree(binfo);
 fail_kzalloc:
+	msm_comm_smem_free(inst, handle);
 	return rc;
 }
 

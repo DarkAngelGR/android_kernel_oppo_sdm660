@@ -2267,27 +2267,31 @@ static void qpnp_hap_td_enable(struct timed_output_dev *dev, int time_ms)
 	pr_err("vib on = %d\n",time_ms);
 #endif/*CONFIG_VENDOR_REALME*/
 
-
 #ifndef CONFIG_VENDOR_REALME//Fanhong.Kong@PSW.BSP.CHG, 2018/1/20, Add for vib stopped by timer before
-	if (time_ms == 0) {
-		/* disable haptics */
-		hrtimer_cancel(&hap->hap_timer);
-		hap->state = 0;
-		schedule_work(&hap->work);
+	if (hap->state == state) {
+		if (state) {
+			rem = hrtimer_get_remaining(&hap->hap_timer);
+			if (time_ms > ktime_to_ms(rem)) {
+				time_ms = (time_ms > hap->timeout_ms ?
+						 hap->timeout_ms : time_ms);
+				hrtimer_cancel(&hap->hap_timer);
+				hap->play_time_ms = time_ms;
+				hrtimer_start(&hap->hap_timer,
+						ktime_set(time_ms / 1000,
+						(time_ms % 1000) * 1000000),
+						HRTIMER_MODE_REL);
+			}
+		}
 		mutex_unlock(&hap->lock);
 		return;
 	}
-	
-	if (time_ms < 10)
-		time_ms = 10;
-	
 
-	if (is_sw_lra_auto_resonance_control(hap))
-		hrtimer_cancel(&hap->auto_res_err_poll_timer);
-
-
-	hrtimer_cancel(&hap->hap_timer);
-
+	hap->state = state;
+	if (!hap->state) {
+		hrtimer_cancel(&hap->hap_timer);
+	} else {
+		if (time_ms < 10)
+			time_ms = 10;
 
 		if (hap->auto_mode) {
 			rc = qpnp_hap_auto_mode_config(hap, time_ms);

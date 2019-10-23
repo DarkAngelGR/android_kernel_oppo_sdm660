@@ -4284,16 +4284,18 @@ void msm_ipc_router_xprt_notify(struct msm_ipc_router_xprt *xprt,
 
 	mutex_lock(&xprt_info->rx_lock_lhb2);
 	list_add_tail(&pkt->list, &xprt_info->pkt_list);
-	/* check every pkt is from SENSOR services or not*/
-	if (is_sensor_port(rport_ptr)) {
-		pkt->ws_need = false;
-	} else if (!xprt_info->dynamic_ws) {
-		__pm_stay_awake(&xprt_info->ws);
-		pkt->ws_need = true;
-	} else {
-		if (is_wakeup_source_allowed) {
+	/* check every pkt is from SENSOR services or not and
+	 * avoid holding both edge and port specific wake-up sources
+	 */
+	if (!is_sensor_port(rport_ptr)) {
+		if (!xprt_info->dynamic_ws) {
 			__pm_stay_awake(&xprt_info->ws);
 			pkt->ws_need = true;
+		} else {
+			if (is_wakeup_source_allowed) {
+				__pm_stay_awake(&xprt_info->ws);
+				pkt->ws_need = true;
+			}
 		}
 	}
 	mutex_unlock(&xprt_info->rx_lock_lhb2);

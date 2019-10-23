@@ -1897,6 +1897,37 @@ static int sde_dbg_reg_base_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+/**
+ * sde_dbg_reg_base_is_valid_range - verify if requested memory range is valid
+ * @off: address offset in bytes
+ * @cnt: memory size in bytes
+ * Return: true if valid; false otherwise
+ */
+static bool sde_dbg_reg_base_is_valid_range(u32 off, u32 cnt)
+{
+	static struct sde_dbg_base *dbg_base = &sde_dbg_base;
+	struct sde_dbg_reg_range *node;
+	struct sde_dbg_reg_base *base;
+
+	pr_debug("check offset=0x%x cnt=0x%x\n", off, cnt);
+
+	list_for_each_entry(base, &dbg_base->reg_base_list, reg_base_head) {
+		list_for_each_entry(node, &base->sub_range_list, head) {
+			pr_debug("%s: start=0x%x end=0x%x\n", node->range_name,
+					node->offset.start, node->offset.end);
+
+			if (node->offset.start <= off
+					&& off <= node->offset.end
+					&& off + cnt <= node->offset.end) {
+				pr_debug("valid range requested\n");
+				return true;
+			}
+		}
+	}
+
+	pr_err("invalid range requested\n");
+	return false;
+}
 
 /**
  * sde_dbg_reg_base_offset_write - set new offset and len to debugfs reg base
@@ -1929,7 +1960,7 @@ static ssize_t sde_dbg_reg_base_offset_write(struct file *file,
 
 	buf[count] = 0;	/* end of string */
 
-	if (sscanf(buf, "%5x %x", &off, &cnt) != 2)
+	if (sscanf(buf, "%x %x", &off, &cnt) != 2)
 		return -EFAULT;
 
 	mutex_lock(&sde_dbg_base.mutex);
@@ -1951,8 +1982,15 @@ static ssize_t sde_dbg_reg_base_offset_write(struct file *file,
 		goto exit;
 	}
 
-	if (cnt == 0)
-		return -EINVAL;
+	if (cnt == 0) {
+		rc = -EINVAL;
+		goto exit;
+	}
+
+	if (!sde_dbg_reg_base_is_valid_range(off, cnt)) {
+		rc = -EINVAL;
+		goto exit;
+	}
 
 	dbg->off = off;
 	dbg->cnt = cnt;
@@ -2095,7 +2133,7 @@ static ssize_t sde_dbg_reg_base_reg_read(struct file *file,
 
 	mutex_lock(&sde_dbg_base.mutex);
 	if (!dbg->buf) {
-		char *hwbuf, *hwbuf_cur;
+		char *hwbuf;
 		char dump_buf[64];
 		char __iomem *ioptr;
 		int cnt, tot;
@@ -2113,39 +2151,36 @@ static ssize_t sde_dbg_reg_base_reg_read(struct file *file,
 			return -ENOMEM;
 		}
 
-		hwbuf = kzalloc(dbg->buf_len, GFP_KERNEL);
+		hwbuf = kzalloc(ROW_BYTES, GFP_KERNEL);
 		if (!hwbuf) {
 			kfree(dbg->buf);
 			mutex_unlock(&sde_dbg_base.mutex);
 			return -ENOMEM;
 		}
-		hwbuf_cur = hwbuf;
 
 		ioptr = dbg->base + dbg->off;
 		tot = 0;
-
 		_sde_dbg_enable_power(true);
 
-		memcpy_fromio(hwbuf, ioptr, dbg->buf_len);
-
-		_sde_dbg_enable_power(false);
-
 		for (cnt = dbg->cnt; cnt > 0; cnt -= ROW_BYTES) {
-			hex_dump_to_buffer(hwbuf_cur,
+			memcpy_fromio(hwbuf, ioptr, ROW_BYTES);
+			hex_dump_to_buffer(hwbuf,
 					   min(cnt, ROW_BYTES),
 					   ROW_BYTES, GROUP_BYTES, dump_buf,
 					   sizeof(dump_buf), false);
 			len = scnprintf(dbg->buf + tot, dbg->buf_len - tot,
 					"0x%08x: %s\n",
-					((int) (unsigned long) hwbuf_cur) -
+					((int) (unsigned long) ioptr) -
 					((int) (unsigned long) dbg->base),
 					dump_buf);
 
-			hwbuf_cur += ROW_BYTES;
+			ioptr += ROW_BYTES;
 			tot += len;
 			if (tot >= dbg->buf_len)
 				break;
 		}
+
+		_sde_dbg_enable_power(false);
 
 		dbg->buf_len = tot;
 		kfree(hwbuf);

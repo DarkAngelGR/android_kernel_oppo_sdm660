@@ -2659,6 +2659,13 @@ int mdss_mdp_overlay_kickoff(struct msm_fb_data_type *mfd,
 		goto commit_fail;
 	}
 
+	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_DSI_DYNAMIC_BITCLK,
+		NULL, CTL_INTF_EVENT_FLAG_SKIP_BROADCAST);
+	if (IS_ERR_VALUE(ret)) {
+		pr_err("failed to update dynamic bit clk!\n");
+		goto commit_fail;
+	}
+
 	mutex_lock(&mdp5_data->ov_lock);
 
 	/* Disable secure display/camera for video mode panels */
@@ -3446,7 +3453,7 @@ static void dfps_update_panel_params(struct mdss_panel_data *pdata,
 		dfps_update_fps(&pdata->panel_info, new_fps);
 
 		pdata->panel_info.prg_fet =
-			mdss_mdp_get_prefetch_lines(&pdata->panel_info);
+			mdss_mdp_get_prefetch_lines(&pdata->panel_info, false);
 
 	} else if (pdata->panel_info.dfps_update ==
 			DFPS_IMMEDIATE_PORCH_UPDATE_MODE_HFP) {
@@ -5959,6 +5966,7 @@ static int mdss_mdp_overlay_off(struct msm_fb_data_type *mfd)
 	int rc;
 	struct mdss_overlay_private *mdp5_data;
 	struct mdss_mdp_mixer *mixer;
+	struct mdss_mdp_pipe *pipe, *tmp;
 	int need_cleanup;
 	int retire_cnt;
 	bool destroy_ctl = false;
@@ -6014,6 +6022,13 @@ static int mdss_mdp_overlay_off(struct msm_fb_data_type *mfd)
 		mixer->cursor_enabled = 0;
 
 	mutex_lock(&mdp5_data->list_lock);
+	if (!list_empty(&mdp5_data->pipes_used)) {
+		list_for_each_entry_safe(
+			pipe, tmp, &mdp5_data->pipes_used, list) {
+			pipe->file = NULL;
+			list_move(&pipe->list, &mdp5_data->pipes_cleanup);
+		}
+	}
 	need_cleanup = !list_empty(&mdp5_data->pipes_cleanup);
 	mutex_unlock(&mdp5_data->list_lock);
 	mutex_unlock(&mdp5_data->ov_lock);
@@ -6517,8 +6532,17 @@ void mdss_mdp_footswitch_ctrl_handler(bool on)
 }
 
 static void mdss_mdp_signal_retire_fence(struct msm_fb_data_type *mfd,
-						int retire_cnt)
+					 int retire_cnt)
 {
+	struct mdss_overlay_private *mdp5_data;
+
+	if (!mfd)
+		return;
+
+	mdp5_data = mfd_to_mdp5_data(mfd);
+	if (!mdp5_data->ctl || !mdp5_data->ctl->ops.remove_vsync_handler)
+		return;
+
 	__vsync_retire_signal(mfd, retire_cnt);
 	pr_debug("Signaled (%d) pending retire fence\n", retire_cnt);
 }

@@ -145,11 +145,6 @@ static struct ath10k_wcn3990_clk_info clk_cfg[] = {
 
 #define ATH10K_WCN3990_CLK_INFO_SIZE		ARRAY_SIZE(clk_cfg)
 
-enum ath10k_driver_state {
-	ATH10K_DRIVER_STATE_PROBED,
-	ATH10K_DRIVER_STATE_STARTED,
-};
-
 /* struct ath10k_snoc: SNOC info struct
  * @dev: device structure
  * @ar:ath10k base structure

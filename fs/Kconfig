@@ -77,6 +77,7 @@ config FILE_LOCKING
 #Chunyi.Mei@PSW.BSP.FS.F2FS, 2017-10-23, Add for support f2fs
 source "fs/crypto/Kconfig"
 #endif /* CONFIG_VENDOR_REALME */
+
 source "fs/notify/Kconfig"
 
 source "fs/quota/Kconfig"

@@ -39,10 +39,10 @@
 #include "sde_trace.h"
 
 /* default input fence timeout, in ms */
-#define SDE_CRTC_INPUT_FENCE_TIMEOUT    2000
+#define SDE_CRTC_INPUT_FENCE_TIMEOUT    10000
 
 /*
- * The default input fence timeout is 2 seconds while max allowed
+ * The default input fence timeout is 10 seconds while max allowed
  * range is 10 seconds. Any value above 10 seconds adds glitches beyond
  * tolerance limit.
  */
@@ -204,10 +204,15 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 			idx = left_crtc_zpos_cnt[pstate->stage]++;
 		}
 
+		/* stage plane on right LM if it crosses the boundary */
+		lm_right = (lm_idx == LEFT_MIXER) &&
+		   (plane->state->crtc_x + plane->state->crtc_w >
+							crtc_split_width);
+
 		/*
 		 * program each mixer with two hw pipes in dual mixer mode,
 		 */
-		if (sde_crtc->num_mixers == CRTC_DUAL_MIXERS) {
+		if (sde_crtc->num_mixers == CRTC_DUAL_MIXERS && lm_right) {
 			stage_cfg->stage[LEFT_MIXER][pstate->stage][1] =
 				sde_plane_pipe(plane, 1);
 
@@ -218,10 +223,7 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 		flush_mask |= ctl->ops.get_bitmask_sspp(ctl,
 				sde_plane_pipe(plane, lm_idx ? 1 : 0));
 
-		/* stage plane on right LM if it crosses the boundary */
-		lm_right = (lm_idx == LEFT_MIXER) &&
-		   (plane->state->crtc_x + plane->state->crtc_w >
-							crtc_split_width);
+
 
 		stage_cfg->stage[lm_idx][pstate->stage][idx] =
 					sde_plane_pipe(plane, lm_idx ? 1 : 0);
@@ -238,6 +240,10 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 				plane->state->fb->base.id : -1);
 
 		format = to_sde_format(msm_framebuffer_format(pstate->base.fb));
+		if (!format) {
+			SDE_ERROR("%s: get sde format failed\n", __func__);
+			return;
+		}
 
 		/* blend config update */
 		if (pstate->stage != SDE_STAGE_BASE) {
@@ -298,6 +304,8 @@ static void _sde_crtc_blend_setup(struct drm_crtc *crtc)
 	struct sde_crtc_mixer *mixer = sde_crtc->mixers;
 	struct sde_hw_ctl *ctl;
 	struct sde_hw_mixer *lm;
+	struct sde_splash_info *sinfo;
+	struct sde_kms *sde_kms = _sde_crtc_get_kms(crtc);
 
 	int i;
 
@@ -305,6 +313,17 @@ static void _sde_crtc_blend_setup(struct drm_crtc *crtc)
 
 	if (sde_crtc->num_mixers > CRTC_DUAL_MIXERS) {
 		SDE_ERROR("invalid number mixers: %d\n", sde_crtc->num_mixers);
+		return;
+	}
+
+	if (!sde_kms) {
+		SDE_ERROR("invalid sde_kms\n");
+		return;
+	}
+
+	sinfo = &sde_kms->splash_info;
+	if (!sinfo) {
+		SDE_ERROR("invalid splash info\n");
 		return;
 	}
 
@@ -317,7 +336,10 @@ static void _sde_crtc_blend_setup(struct drm_crtc *crtc)
 		mixer[i].flush_mask = 0;
 		if (mixer[i].hw_ctl->ops.clear_all_blendstages)
 			mixer[i].hw_ctl->ops.clear_all_blendstages(
-					mixer[i].hw_ctl);
+					mixer[i].hw_ctl,
+					sinfo->handoff,
+					sinfo->reserved_pipe_info,
+					MAX_BLOCKS);
 	}
 
 	/* initialize stage cfg */
@@ -344,7 +366,8 @@ static void _sde_crtc_blend_setup(struct drm_crtc *crtc)
 			mixer[i].flush_mask);
 
 		ctl->ops.setup_blendstage(ctl, mixer[i].hw_lm->idx,
-			&sde_crtc->stage_cfg, i);
+			&sde_crtc->stage_cfg, i,
+			sinfo->handoff, sinfo->reserved_pipe_info, MAX_BLOCKS);
 	}
 }
 
@@ -605,23 +628,14 @@ void sde_crtc_complete_commit(struct drm_crtc *crtc,
 {
 	struct sde_crtc *sde_crtc;
 	struct sde_crtc_state *cstate;
-	struct drm_connector *conn;
-	struct sde_connector *c_conn;
-	struct drm_device *dev;
-	struct msm_drm_private *priv;
-	struct sde_kms *sde_kms;
 	int i;
 
-	if (!crtc || !crtc->state || !crtc->dev) {
+	if (!crtc || !crtc->state) {
 		SDE_ERROR("invalid crtc\n");
 		return;
 	}
 
-	dev = crtc->dev;
-	priv = dev->dev_private;
-
 	sde_crtc = to_sde_crtc(crtc);
-	sde_kms = _sde_crtc_get_kms(crtc);
 	cstate = to_sde_crtc_state(crtc->state);
 	SDE_EVT32(DRMID(crtc));
 
@@ -630,22 +644,6 @@ void sde_crtc_complete_commit(struct drm_crtc *crtc,
 
 	for (i = 0; i < cstate->num_connectors; ++i)
 		sde_connector_complete_commit(cstate->connectors[i]);
-
-	if (sde_splash_get_lk_complete_status(&sde_kms->splash_info)) {
-		mutex_lock(&dev->mode_config.mutex);
-		drm_for_each_connector(conn, crtc->dev) {
-			if (conn->state->crtc != crtc)
-				continue;
-
-			c_conn = to_sde_connector(conn);
-
-			sde_splash_clean_up_free_resource(priv->kms,
-					&priv->phandle,
-					c_conn->connector_type,
-					c_conn->display);
-		}
-		mutex_unlock(&dev->mode_config.mutex);
-	}
 }
 
 /**
@@ -938,6 +936,11 @@ void sde_crtc_commit_kickoff(struct drm_crtc *crtc)
 	dev = crtc->dev;
 	sde_crtc = to_sde_crtc(crtc);
 	sde_kms = _sde_crtc_get_kms(crtc);
+	if (!sde_kms) {
+		SDE_ERROR("invalid sde_kms\n");
+		return;
+	}
+
 	priv = sde_kms->dev->dev_private;
 
 	/*
@@ -1213,7 +1216,7 @@ static void sde_crtc_disable(struct drm_crtc *crtc)
 			sde_crtc->vblank_requested) {
 		ret = _sde_crtc_vblank_enable_no_lock(sde_crtc, false);
 		if (ret)
-			SDE_ERROR("%s vblank enable failed: %d\n",
+			SDE_ERROR("%s vblank disable failed: %d\n",
 				sde_crtc->name, ret);
 	}
 
@@ -1538,16 +1541,18 @@ int sde_crtc_vblank(struct drm_crtc *crtc, bool en)
 	sde_crtc = to_sde_crtc(crtc);
 
 	mutex_lock(&sde_crtc->crtc_lock);
-	SDE_EVT32(DRMID(&sde_crtc->base), en, sde_crtc->enabled,
-			sde_crtc->suspend, sde_crtc->vblank_requested);
-	if (sde_crtc->enabled && !sde_crtc->suspend) {
-		ret = _sde_crtc_vblank_enable_no_lock(sde_crtc, en);
-		if (ret)
-			SDE_ERROR("%s vblank enable failed: %d\n",
-					sde_crtc->name, ret);
-	}
+	if (sde_crtc->vblank_requested != en) {
+		SDE_EVT32(DRMID(&sde_crtc->base), en, sde_crtc->enabled,
+				sde_crtc->suspend, sde_crtc->vblank_requested);
+		if (sde_crtc->enabled && !sde_crtc->suspend) {
+			ret = _sde_crtc_vblank_enable_no_lock(sde_crtc, en);
+			if (ret)
+				SDE_ERROR("%s vblank enable failed: %d\n",
+						sde_crtc->name, ret);
+		}
 
-	sde_crtc->vblank_requested = en;
+		sde_crtc->vblank_requested = en;
+	}
 	mutex_unlock(&sde_crtc->crtc_lock);
 
 	return 0;
@@ -1588,6 +1593,10 @@ static void sde_crtc_install_properties(struct drm_crtc *crtc,
 	sde_crtc = to_sde_crtc(crtc);
 	dev = crtc->dev;
 	sde_kms = _sde_crtc_get_kms(crtc);
+	if (!sde_kms) {
+		SDE_ERROR("invalid sde_kms\n");
+		return;
+	}
 
 	info = kzalloc(sizeof(struct sde_kms_info), GFP_KERNEL);
 	if (!info) {
@@ -1633,8 +1642,18 @@ static void sde_crtc_install_properties(struct drm_crtc *crtc,
 	sde_kms_info_add_keyint(info, "hw_version", catalog->hwversion);
 	sde_kms_info_add_keyint(info, "max_linewidth",
 			catalog->max_mixer_width);
-	sde_kms_info_add_keyint(info, "max_blendstages",
-			catalog->max_mixer_blendstages);
+
+	/* till now, we can't know which display early RVC will run on.
+	 * Not to impact early RVC's layer, we decrease all lm's blend stage.
+	 * This should be restored after handoff is done.
+	 */
+	if (sde_kms->splash_info.handoff)
+		sde_kms_info_add_keyint(info, "max_blendstages",
+				catalog->max_mixer_blendstages - 1);
+	else
+		sde_kms_info_add_keyint(info, "max_blendstages",
+				catalog->max_mixer_blendstages);
+
 	if (catalog->qseed_type == SDE_SSPP_SCALER_QSEED2)
 		sde_kms_info_add_keystr(info, "qseed_type", "qseed2");
 	if (catalog->qseed_type == SDE_SSPP_SCALER_QSEED3)
@@ -1734,13 +1753,14 @@ static int sde_crtc_atomic_get_property(struct drm_crtc *crtc,
 	} else {
 		sde_crtc = to_sde_crtc(crtc);
 		cstate = to_sde_crtc_state(state);
+
 		i = msm_property_index(&sde_crtc->property_info, property);
 		if (i == CRTC_PROP_OUTPUT_FENCE) {
 			int offset = sde_crtc_get_property(cstate,
 					CRTC_PROP_OUTPUT_FENCE_OFFSET);
 
-			ret = sde_fence_create(
-					&sde_crtc->output_fence, val, offset);
+			ret = sde_fence_create(&sde_crtc->output_fence, val,
+							offset);
 			if (ret)
 				SDE_ERROR("fence create failed\n");
 		} else {

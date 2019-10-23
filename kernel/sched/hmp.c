@@ -1577,7 +1577,7 @@ void free_task_load_ptrs(struct task_struct *p)
 	p->ravg.prev_window_cpu = NULL;
 }
 
-void init_new_task_load(struct task_struct *p, bool idle_task)
+void init_new_task_load(struct task_struct *p)
 {
 	int i;
 	u32 init_load_windows = sched_init_task_load_windows;
@@ -1603,9 +1603,6 @@ void init_new_task_load(struct task_struct *p, bool idle_task)
 
 	/* Don't have much choice. CPU frequency would be bogus */
 	BUG_ON(!p->ravg.curr_window_cpu || !p->ravg.prev_window_cpu);
-
-	if (idle_task)
-		return;
 
 	if (init_load_pct)
 		init_load_windows = div64_u64((u64)init_load_pct *
@@ -2114,14 +2111,11 @@ static u32  top_task_load(struct rq *rq)
 	}
 }
 
-static int load_to_index(u32 load)
+static u32 load_to_index(u32 load)
 {
-	if (load < sched_load_granule)
-		return 0;
-	else if (load >= sched_ravg_window)
-		return NUM_LOAD_INDICES - 1;
-	else
-		return load / sched_load_granule;
+	u32 index = load / sched_load_granule;
+
+	return min(index, (u32)(NUM_LOAD_INDICES - 1));
 }
 
 static void update_top_tasks(struct task_struct *p, struct rq *rq,
@@ -2645,7 +2639,8 @@ update_task_rq_cpu_cycles(struct task_struct *p, struct rq *rq, int event,
 
 	p->cpu_cycles = cur_cycles;
 
-	trace_sched_get_task_cpu_cycles(cpu, event, rq->cc.cycles, rq->cc.time);
+	trace_sched_get_task_cpu_cycles(cpu, event, rq->cc.cycles,
+					rq->cc.time, p);
 }
 
 static int
